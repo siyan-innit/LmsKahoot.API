@@ -195,6 +195,7 @@
     <Compile Include="Global.asax.cs">
       <DependentUpon>Global.asax</DependentUpon>
     </Compile>
+    <Compile Include="Hubs\QuizHub.cs" />
     <Compile Include="Models\ParticipantAnswer.cs" />
     <Compile Include="Models\Quiz.cs" />
     <Compile Include="Models\QuizOption.cs" />
