@@ -1,0 +1,43 @@
+## Ignore build output
+bin/
+obj/
+
+## Ignore Visual Studio files
+.vs/
+*.user
+*.suo
+*.cache
+*.log
+
+## Ignore NuGet packages
+packages/
+*.nupkg
+*.snupkg
+
+## Ignore MSBuild folders
+Generated_Code/
+_TestResults/
+
+## Ignore SQL local DB files
+*.mdf
+*.ldf
+
+## Ignore publish artifacts
+*.PublishSettings
+publish/
+app.publish/
+
+## Ignore configuration if contains secrets (optional)
+appsettings.*.json
+appsettings.Development.json
+
+## Ignore IIS Express
+iisexpress/
+
+## Ignore ReSharper / Rider
+_ReSharper*/
+*.DotSettings.user
+
+## Ignore Node / Angular (if frontend inside repo)
+node_modules/
+dist/
