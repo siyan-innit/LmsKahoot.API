@@ -1,0 +1,140 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>QuizHub SignalR Test</title>
+
+    <!-- jQuery from CDN -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    <!-- SignalR client from your project (installed by NuGet) -->
+    <script src="/Scripts/jquery.signalR-2.4.3.min.js"></script>
+
+    <!-- Auto-generated hub proxies -->
+    <script src="/signalr/hubs"></script>
+
+    <style>
+        body {
+            font-family: Consolas, monospace;
+            padding: 10px;
+        }
+
+        input {
+            margin: 3px;
+        }
+
+        button {
+            margin: 3px;
+        }
+
+        #log {
+            border: 1px solid #ccc;
+            padding: 8px;
+            height: 300px;
+            overflow-y: auto;
+            background: #111;
+            color: #0f0;
+        }
+    </style>
+</head>
+<body>
+    <h2>QuizHub SignalR Test</h2>
+
+    <div>
+        <label>Session Code (PIN):</label>
+        <input id="sessionCode" value="123456" />
+        <label>Display Name:</label>
+        <input id="displayName" value="Siyan" />
+        <button id="btnJoin">JoinSession</button>
+    </div>
+
+    <div>
+        <label>SessionId:</label>
+        <input id="sessionId" value="1" />
+        <label>Question Index (0-based):</label>
+        <input id="questionIndex" value="0" />
+        <button id="btnStartQuestion">StartQuestion</button>
+        <button id="btnEndQuestion">EndQuestion</button>
+    </div>
+
+    <div>
+        <label>ParticipantId:</label>
+        <input id="participantId" value="1" />
+        <label>QuestionId:</label>
+        <input id="questionId" value="1" />
+        <label>OptionId:</label>
+        <input id="optionId" value="1" />
+        <button id="btnSubmitAnswer">SubmitAnswer</button>
+    </div>
+
+    <h3>Log</h3>
+    <pre id="log"></pre>
+
+    <script>
+        function log() {
+            var text = Array.prototype.slice.call(arguments).join(" ");
+            console.log(text);
+            var $log = $("#log");
+            $log.append(text + "\n");
+            $log.scrollTop($log[0].scrollHeight);
+        }
+
+        $(function () {
+            if (!$.connection || !$.connection.quizHub) {
+                log("quizHub not found on $.connection – check /signalr/hubs and jquery.signalR reference.");
+                return;
+            }
+
+            var hub = $.connection.quizHub;
+
+            // CLIENT EVENTS
+            hub.client.JoinFailed = function (msg) { log("JoinFailed:", msg); };
+            hub.client.SessionState = function (state, participant) { log("SessionState:", JSON.stringify(state)); log("Participant:", JSON.stringify(participant)); };
+            hub.client.ParticipantJoined = function (p) { log("ParticipantJoined:", JSON.stringify(p)); };
+            hub.client.QuestionStarted = function (state) { log("QuestionStarted:", JSON.stringify(state)); };
+            hub.client.QuestionEnded = function (state) { log("QuestionEnded:", JSON.stringify(state)); };
+            hub.client.AnswerAccepted = function (res) { log("AnswerAccepted:", JSON.stringify(res)); };
+            hub.client.AnswerRejected = function (msg) { log("AnswerRejected:", msg); };
+            hub.client.LeaderboardUpdated = function (lb) { log("LeaderboardUpdated:", JSON.stringify(lb)); };
+
+            // START CONNECTION
+            $.connection.hub.start().done(function () {
+                log("Connected as:", $.connection.hub.id);
+
+                // BUTTON HANDLERS
+                $("#btnJoin").click(function () {
+                    var code = $("#sessionCode").val();
+                    var name = $("#displayName").val();
+                    log("Calling JoinSession", code, name);
+                    hub.server.joinSession(code, name);
+                });
+
+                $("#btnStartQuestion").click(function () {
+                    var sessionId = parseInt($("#sessionId").val());
+                    var index = parseInt($("#questionIndex").val());
+                    log("Calling StartQuestion", sessionId, index);
+                    hub.server.startQuestion(sessionId, index);
+                });
+
+                $("#btnEndQuestion").click(function () {
+                    var sessionId = parseInt($("#sessionId").val());
+                    log("Calling EndQuestion", sessionId);
+                    hub.server.endQuestion(sessionId);
+                });
+
+                $("#btnSubmitAnswer").click(function () {
+                    var sessionId = parseInt($("#sessionId").val());
+                    var participantId = parseInt($("#participantId").val());
+                    var questionId = parseInt($("#questionId").val());
+                    var optionId = parseInt($("#optionId").val());
+                    log("Calling SubmitAnswer", sessionId, participantId, questionId, optionId);
+                    hub.server.submitAnswer(sessionId, participantId, questionId, optionId);
+                });
+
+            }).fail(function (err) {
+                log("Connection failed:", err);
+            });
+        });
+    </script>
+</body>
+</html>

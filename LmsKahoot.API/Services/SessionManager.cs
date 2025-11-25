@@ -42,7 +42,7 @@ namespace LmsKahoot.API.Services
 
             public DateTime? QuestionStartUtc { get; set; }
 
-            // For now one global time-limit; later we can override per question
+            // For now one global time-limit; overridden when question starts
             public int TimeLimitSeconds { get; set; } = 30;
 
             // participantId -> runtime info
@@ -56,6 +56,8 @@ namespace LmsKahoot.API.Services
             public string DisplayName { get; set; }
             public int TotalScore { get; set; }
             public int? AverageResponseTimeMs { get; set; }
+
+            // For more advanced logic we could also track per-question, but DB does that.
         }
 
         #endregion
@@ -128,6 +130,83 @@ namespace LmsKahoot.API.Services
         }
 
         /// <summary>
+        /// Start a question for a given session.
+        /// This sets the current question index/id, time limit, and start time.
+        /// </summary>
+        public SessionStateDto StartQuestion(int sessionId, int questionId, int questionIndex, int timeLimitSeconds)
+        {
+            if (!_sessions.TryGetValue(sessionId, out var state))
+            {
+                // If session is not in memory yet, initialize a basic one
+                state = new SessionRuntimeState
+                {
+                    SessionId = sessionId
+                };
+                _sessions[sessionId] = state;
+            }
+
+            state.Status = SessionStatus.InProgress;
+            state.CurrentQuestionIndex = questionIndex;
+            state.CurrentQuestionId = questionId;
+            state.TimeLimitSeconds = timeLimitSeconds;
+            state.QuestionStartUtc = DateTime.UtcNow;
+
+            return GetSessionState(sessionId);
+        }
+
+        /// <summary>
+        /// Marks the current question as ended (no more answers accepted).
+        /// </summary>
+        public SessionStateDto EndQuestion(int sessionId)
+        {
+            if (!_sessions.TryGetValue(sessionId, out var state))
+            {
+                return null;
+            }
+
+            state.Status = SessionStatus.BetweenQuestions;
+            // We keep CurrentQuestionId and QuestionStartUtc for history if needed
+
+            return GetSessionState(sessionId);
+        }
+
+        /// <summary>
+        /// Apply scoring for an answer and update leaderboard.
+        /// Called AFTER the hub has validated and stored the answer in DB.
+        /// </summary>
+        public SessionStateDto ApplyAnswerScore(int sessionId, int participantId, int responseTimeMs, int scoreEarned)
+        {
+            if (!_sessions.TryGetValue(sessionId, out var state))
+            {
+                return null;
+            }
+
+            if (!state.Participants.TryGetValue(participantId, out var participant))
+            {
+                return null;
+            }
+
+            // Update total score
+            participant.TotalScore += scoreEarned;
+
+            // Update average response time (simple average)
+            if (responseTimeMs > 0)
+            {
+                if (participant.AverageResponseTimeMs == null)
+                {
+                    participant.AverageResponseTimeMs = responseTimeMs;
+                }
+                else
+                {
+                    // Simple smoothing: take average of old and new
+                    participant.AverageResponseTimeMs = (participant.AverageResponseTimeMs.Value + responseTimeMs) / 2;
+                }
+            }
+
+            return GetSessionState(sessionId);
+        }
+
+        /// <summary>
         /// Returns a snapshot of the current session state for late join / sync.
         /// Returns null if session not tracked in memory.
         /// </summary>
@@ -176,10 +255,7 @@ namespace LmsKahoot.API.Services
             };
         }
 
-        // We will later add:
-        // - StartQuestion(...)
-        // - SubmitAnswer(...)
-        // - EndQuestion(...)
+        // Later we’ll add:
         // - EndSession(...)
     }
 }
