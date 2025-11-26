@@ -95,6 +95,15 @@ namespace LmsKahoot.API.Hubs
             Clients.OthersInGroup(groupName).ParticipantJoined(participantDto);
         }
 
+<<<<<<< Updated upstream
+=======
+<<<<<<< HEAD
+        public async Task JoinSessionGroup(int sessionId)
+        {
+            var groupName = GetGroupName(sessionId);
+            await Groups.Add(Context.ConnectionId, groupName);
+=======
+>>>>>>> Stashed changes
         /// <summary>
         /// CLIENT -> SERVER (Teacher)
         /// Start a question by index (0-based) for the given session.
@@ -284,6 +293,10 @@ namespace LmsKahoot.API.Hubs
             }
 
             await Task.CompletedTask;
+<<<<<<< Updated upstream
+=======
+>>>>>>> 20b6a96468fa6124350e6b9d2fdd2ec42be92500
+>>>>>>> Stashed changes
         }
 
         private static string GetGroupName(int sessionId)
