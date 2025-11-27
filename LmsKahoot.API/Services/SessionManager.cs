@@ -75,7 +75,7 @@ namespace LmsKahoot.API.Services
                 CurrentQuestionIndex = -1,
                 CurrentQuestionId = null,
                 QuestionStartUtc = null,
-                TimeLimitSeconds = timeLimitSecondsPerQuestion,
+                TimeLimitSeconds = timeLimitSecondsPerQuestion > 0 ? timeLimitSecondsPerQuestion : 30,
                 Participants = new Dictionary<int, ParticipantRuntimeState>()
             };
 
@@ -98,7 +98,13 @@ namespace LmsKahoot.API.Services
                 // If session wasn't in memory (e.g. app restarted), create a basic one
                 state = new SessionRuntimeState
                 {
-                    SessionId = sessionId
+                    SessionId = sessionId,
+                    Status = SessionStatus.Lobby,
+                    CurrentQuestionIndex = -1,
+                    CurrentQuestionId = null,
+                    QuestionStartUtc = null,
+                    TimeLimitSeconds = 30,
+                    Participants = new Dictionary<int, ParticipantRuntimeState>()
                 };
                 _sessions[sessionId] = state;
             }
@@ -140,7 +146,13 @@ namespace LmsKahoot.API.Services
                 // If session is not in memory yet, initialize a basic one
                 state = new SessionRuntimeState
                 {
-                    SessionId = sessionId
+                    SessionId = sessionId,
+                    Status = SessionStatus.Lobby,
+                    CurrentQuestionIndex = -1,
+                    CurrentQuestionId = null,
+                    QuestionStartUtc = null,
+                    TimeLimitSeconds = 30,
+                    Participants = new Dictionary<int, ParticipantRuntimeState>()
                 };
                 _sessions[sessionId] = state;
             }
@@ -148,7 +160,7 @@ namespace LmsKahoot.API.Services
             state.Status = SessionStatus.InProgress;
             state.CurrentQuestionIndex = questionIndex;
             state.CurrentQuestionId = questionId;
-            state.TimeLimitSeconds = timeLimitSeconds;
+            state.TimeLimitSeconds = timeLimitSeconds > 0 ? timeLimitSeconds : 30;
             state.QuestionStartUtc = DateTime.UtcNow;
 
             return GetSessionState(sessionId);
@@ -189,7 +201,7 @@ namespace LmsKahoot.API.Services
             // Update total score
             participant.TotalScore += scoreEarned;
 
-            // Update average response time (simple average)
+            // Update average response time (simple smoothed average)
             if (responseTimeMs > 0)
             {
                 if (participant.AverageResponseTimeMs == null)
@@ -198,8 +210,8 @@ namespace LmsKahoot.API.Services
                 }
                 else
                 {
-                    // Simple smoothing: take average of old and new
-                    participant.AverageResponseTimeMs = (participant.AverageResponseTimeMs.Value + responseTimeMs) / 2;
+                    participant.AverageResponseTimeMs =
+                        (participant.AverageResponseTimeMs.Value + responseTimeMs) / 2;
                 }
             }
 

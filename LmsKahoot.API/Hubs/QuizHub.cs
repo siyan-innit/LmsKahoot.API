@@ -124,7 +124,9 @@ namespace LmsKahoot.API.Hubs
             }
 
             var question = questions[questionIndex];
-            var timeLimitSeconds = question.TimeLimitSeconds;
+            var timeLimitSeconds = question.TimeLimitSeconds > 0
+                ? question.TimeLimitSeconds
+                : 30; // fallback
 
             // 3) Update in-memory session state
             var state = SessionManager.Instance.StartQuestion(
@@ -172,119 +174,143 @@ namespace LmsKahoot.API.Hubs
         /// </summary>
         public async Task SubmitAnswer(int sessionId, int participantId, int questionId, int selectedOptionId)
         {
-            var groupName = GetGroupName(sessionId);
-
-            // 1) Get current state and validate timing + question
-            var state = SessionManager.Instance.GetSessionState(sessionId);
-            if (state == null)
+            try
             {
-                Clients.Caller.AnswerRejected("Session not active.");
-                return;
+                var groupName = GetGroupName(sessionId);
+
+                // 1) Get current state and validate timing + question
+                var state = SessionManager.Instance.GetSessionState(sessionId);
+                if (state == null)
+                {
+                    Clients.Caller.AnswerRejected("Session not active.");
+                    return;
+                }
+
+                if (state.Status != SessionStatus.InProgress)
+                {
+                    Clients.Caller.AnswerRejected("Question is not active.");
+                    return;
+                }
+
+                if (!state.CurrentQuestionId.HasValue || state.CurrentQuestionId.Value != questionId)
+                {
+                    Clients.Caller.AnswerRejected("Invalid question for current session state.");
+                    return;
+                }
+
+                if (!state.QuestionStartUtc.HasValue)
+                {
+                    Clients.Caller.AnswerRejected("Question start time not set.");
+                    return;
+                }
+
+                var nowUtc = DateTime.UtcNow;
+                var elapsed = nowUtc - state.QuestionStartUtc.Value;
+                var elapsedMs = (int)elapsed.TotalMilliseconds;
+
+                if (elapsed.TotalSeconds > state.TimeLimitSeconds)
+                {
+                    Clients.Caller.AnswerRejected("Time is up for this question.");
+                    return;
+                }
+
+                // 2) Check if this participant already answered this question in DB
+                var existingAnswer = _context.ParticipantAnswers
+                    .SingleOrDefault(a =>
+                        a.SessionId == sessionId &&
+                        a.ParticipantId == participantId &&
+                        a.QuestionId == questionId);
+
+                if (existingAnswer != null)
+                {
+                    Clients.Caller.AnswerRejected("You have already answered this question.");
+                    return;
+                }
+
+                // 3) Validate selected option and correctness
+                var option = _context.QuizOptions
+                    .SingleOrDefault(o => o.OptionId == selectedOptionId && o.QuestionId == questionId);
+
+                if (option == null)
+                {
+                    Clients.Caller.AnswerRejected("Selected option is invalid.");
+                    return;
+                }
+
+                bool isCorrect = option.IsCorrect;
+
+                // 4) Calculate score based on correctness + speed
+                int scoreEarned = 0;
+                if (isCorrect)
+                {
+                    var totalMs = Math.Max(1, state.TimeLimitSeconds * 1000); // avoid division by zero
+                    var remainingMs = Math.Max(0, totalMs - elapsedMs);
+                    var timeFactor = (double)remainingMs / totalMs;
+
+                    scoreEarned = 500 + (int)(500 * timeFactor);
+                }
+
+                // 5) Persist answer in DB
+                var answer = new ParticipantAnswer
+                {
+                    SessionId = sessionId,
+                    ParticipantId = participantId,
+                    QuestionId = questionId,
+                    SelectedOptionId = selectedOptionId,
+                    IsCorrect = isCorrect,
+                    ResponseTimeMs = elapsedMs,
+                    ScoreEarned = scoreEarned,
+                    CreatedAt = nowUtc
+                };
+
+                _context.ParticipantAnswers.Add(answer);
+                _context.SaveChanges();
+
+                // 6) Update in-memory scores / leaderboard
+                var updatedState = SessionManager.Instance.ApplyAnswerScore(
+                    sessionId,
+                    participantId,
+                    elapsedMs,
+                    scoreEarned);
+
+                int? totalScore = null;
+                int correctOptionId = option.OptionId;
+
+                if (updatedState != null)
+                {
+                    var me = updatedState.Leaderboard
+                        .FirstOrDefault(l => l.ParticipantId == participantId);
+                    if (me != null)
+                    {
+                        totalScore = me.TotalScore;
+                    }
+                }
+
+                // 7) Notify caller and all participants
+                Clients.Caller.AnswerAccepted(new
+                {
+                    IsCorrect = isCorrect,
+                    ScoreEarned = scoreEarned,
+                    TotalScore = totalScore,
+                    CorrectOptionId = correctOptionId,
+                    ElapsedMs = elapsedMs
+                });
+
+                if (updatedState != null)
+                {
+                    Clients.Group(groupName).LeaderboardUpdated(updatedState.Leaderboard);
+                }
+
+                await Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                var baseMsg = ex.GetBaseException().Message;
+                Clients.Caller.AnswerRejected("Server error: " + baseMsg);
             }
 
-            if (state.Status != SessionStatus.InProgress)
-            {
-                Clients.Caller.AnswerRejected("Question is not active.");
-                return;
-            }
-
-            if (!state.CurrentQuestionId.HasValue || state.CurrentQuestionId.Value != questionId)
-            {
-                Clients.Caller.AnswerRejected("Invalid question for current session state.");
-                return;
-            }
-
-            if (!state.QuestionStartUtc.HasValue)
-            {
-                Clients.Caller.AnswerRejected("Question start time not set.");
-                return;
-            }
-
-            var nowUtc = DateTime.UtcNow;
-            var elapsed = nowUtc - state.QuestionStartUtc.Value;
-            var elapsedMs = (int)elapsed.TotalMilliseconds;
-
-            if (elapsed.TotalSeconds > state.TimeLimitSeconds)
-            {
-                Clients.Caller.AnswerRejected("Time is up for this question.");
-                return;
-            }
-
-            // 2) Check if this participant already answered this question in DB
-            var existingAnswer = _context.ParticipantAnswers
-                .SingleOrDefault(a =>
-                    a.SessionId == sessionId &&
-                    a.ParticipantId == participantId &&
-                    a.QuestionId == questionId);
-
-            if (existingAnswer != null)
-            {
-                Clients.Caller.AnswerRejected("You have already answered this question.");
-                return;
-            }
-
-            // 3) Validate selected option and correctness
-            var option = _context.QuizOptions
-                .SingleOrDefault(o => o.OptionId == selectedOptionId && o.QuestionId == questionId);
-
-            if (option == null)
-            {
-                Clients.Caller.AnswerRejected("Selected option is invalid.");
-                return;
-            }
-
-            bool isCorrect = option.IsCorrect;
-
-            // 4) Calculate score based on correctness + speed
-            int scoreEarned = 0;
-            if (isCorrect)
-            {
-                // Example scoring:
-                // base 500 pts + up to 500 pts based on remaining time
-                var totalMs = state.TimeLimitSeconds * 1000;
-                var remainingMs = Math.Max(0, totalMs - elapsedMs);
-                var timeFactor = (double)remainingMs / totalMs; // 0..1
-
-                scoreEarned = 500 + (int)(500 * timeFactor);
-            }
-
-            // 5) Persist answer in DB
-            var answer = new ParticipantAnswer
-            {
-                SessionId = sessionId,
-                ParticipantId = participantId,
-                QuestionId = questionId,
-                SelectedOptionId = selectedOptionId,
-                IsCorrect = isCorrect,
-                ResponseTimeMs = elapsedMs,
-                ScoreEarned = scoreEarned,
-                CreatedAt = nowUtc
-            };
-
-            _context.ParticipantAnswers.Add(answer);
-            _context.SaveChanges();
-
-            // 6) Update in-memory scores / leaderboard
-            var updatedState = SessionManager.Instance.ApplyAnswerScore(
-                sessionId,
-                participantId,
-                elapsedMs,
-                scoreEarned);
-
-            // 7) Notify caller and all participants
-            Clients.Caller.AnswerAccepted(new
-            {
-                IsCorrect = isCorrect,
-                ScoreEarned = scoreEarned
-            });
-
-            if (updatedState != null)
-            {
-                Clients.Group(groupName).LeaderboardUpdated(updatedState.Leaderboard);
-            }
-
-            await Task.CompletedTask;
         }
+
 
         private static string GetGroupName(int sessionId)
         {

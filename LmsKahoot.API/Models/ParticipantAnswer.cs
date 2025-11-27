@@ -24,6 +24,6 @@ namespace LmsKahoot.API.Models
         public virtual QuizSession Session { get; set; }
         public virtual QuizSessionParticipant Participant { get; set; }
         public virtual QuizQuestion Question { get; set; }
-        public virtual QuizOption SelectedOption { get; set; }
+        
     }
 }
